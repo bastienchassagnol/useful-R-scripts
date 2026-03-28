@@ -1,0 +1,80 @@
+
+library(dplyr)
+
+# retrieve all the functions of the packages, along with their pairwise connections ----
+installed_packages <- pkgapi::map_package(path = ".")
+package_name <- getwd() %>% basename()
+
+# compute adjency matrix of edges ----
+installed_packages_plot_data <- installed_packages$calls %>%
+  mutate(package=stringr::str_extract(to, "(.*)(?=::)"),
+         file=tools::file_path_sans_ext(file) %>% basename()) %>%
+  select(file, from, str, package) %>% rename(to=str) %>%
+  filter(package==package_name) %>%
+  distinct()
+
+# compute unique set of vertices ----
+unique_functions <- tibble::as_tibble_col(union(installed_packages_plot_data$from,
+                                                installed_packages_plot_data$to),
+                                          column_name = "id")
+
+# generate the graph representation ----
+nodes_visNet <- tibble::tibble(id=unique_functions$id,
+                               label = unique_functions$id,
+                               shape=unique_functions %>%
+                                 dplyr::left_join(installed_packages_plot_data %>%
+                                                    select(-c(to, package)),
+                                                  by = c("id"="from")) %>%
+                                 dplyr::distinct() %>%
+                                 pull(file),
+                               title = paste0("<p><b>", unique_functions$id,"</b><br></p>"))
+## visnetwork representation ----
+visnetwork_plot <- visNetwork::visNetwork(nodes= nodes_visNet,
+                       height = "500px",
+                       edges=installed_packages_plot_data %>% select(-package),
+                       width = "100%") %>%
+  visNetwork::visEdges(arrows =list(to = list(enabled = TRUE, scaleFactor = 2)),
+           color = list(color = "lightblue", highlight = "red"))
+
+visNetwork::visSave(visnetwork_plot, "flextable_network.html")
+
+# visNetwork::visExport(visnetwork_plot, type = "jpeg", name = "flextable_network", background = NULL)
+
+
+
+## igraph représentation ----
+
+graph_packages <- igraph::graph_from_data_frame(installed_packages_plot_data %>%
+                                                  select(-package),
+                                                directed = TRUE)
+igraph::tkplot(graph_packages,
+               canvas.width = 900, canvas.height = 900, size =2,
+               vertex.label.dist=1.5)
+
+## other dynamic graph representation ----
+
+library(igraph)
+library(networkD3)
+
+# create a dataset:
+
+
+# Plot
+p <- simpleNetwork(installed_packages_plot_data,
+                   height="200px", width="200px",
+                   Source = 2,                 # column number of source
+                   Target = 3,                 # column number of target
+                   linkDistance = 5,          # distance between node. Increase this value to have more space between nodes
+                   charge = -200,                # numeric value indicating either the strength of the node repulsion (negative value) or attraction (positive value)
+                   fontSize = 20,               # size of the node names
+                   fontFamily = "serif",       # font og node names
+                   linkColour = "black",        # colour of edges, MUST be a common colour for the whole graph
+                   nodeColour = "#69b3a2",     # colour of nodes, MUST be a common colour for the whole graph
+                   opacity = 0.8,              # opacity of nodes. 0=transparent. 1=no transparency
+                   zoom = T                    # Can you zoom on the figure?
+)
+
+library(htmlwidgets)
+saveWidget(p, file="flextable_functions.html")
+
+
