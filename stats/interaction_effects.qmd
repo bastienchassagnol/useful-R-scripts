@@ -1,0 +1,271 @@
+---
+title: "Deseq2 Analyses and Interaction terms"
+author: "Bastien CHASSAGNOl et Charles Joly BEAUPARLANT"
+bibliography: interaction_terms.bib
+embed-resources: true
+date: last-modified	
+number-sections: true
+filters:
+  - highlight-text
+toc-depth: 3
+comments: 
+  hypothesis: true
+toc-location: left
+link-citations: true
+highlight-style: github
+execute:
+  message: true
+  warning: true
+  error: false
+lightbox: true
+code-fold: show
+---
+
+```{r}
+#| label: "setup"
+#| include: false
+
+library(DESeq2)
+library(dplyr)
+library(tibble)
+```
+
+
+# Model interaction terms with main effects
+
+## Generalities
+
+- Alternative term for interaction: **moderation**. For discrete outcomes, also termed **Spotlight Analysis** or **Simple Effect Analysis**.
+
+- **Contrast analysis** is just a subcomponent of **Post-Hoc Analysis**, whose general objective is to evaluate the magnitude or significance of effects after fitting a regression model to determine **which paiwise comparisons** are significant, see @tip-post-hoc for details.
+
+- **Terminology**, with output $Y$, independent variable $X$ and mediation $M$ (the genotype).
+  - **Main Effect**: The effect of an independent variable without considering interactions.
+  - **Interaction Effect**: The combined effect of interaction and main effect of the independent variable.
+  - **Simple Slope**: slope of $X$ against the response variable $Y$ for specific values when $M$ is continuous, otherwise it's termed 
+  - the **Simple Effect** (conditionned on discrete values of $M$)
+
+::: {#tip-post-hoc .callout-tip title="Classification of post-hoc analyses"}
+
+**Pairwise Comparisons (T-tests with Adjustments)** compare **pairs of factor levels** while controlling for multiple testing:
+ 
+- **Tukey’s Honest Significant Difference (HSD)** (FWER, best for **equal-sized groups**)
+- **Bonferroni Correction** who is very **conservative** (close to **Holm’s Method** – stepwise version of Bonferroni, more **powerful**)
+- **Multiple Testing Corrections** with FDR & Benjamini-Hochberg that adjusts for **false discovery rate (FDR)** when performing many comparisons.  
+ 
+---
+
+Estimated Marginal Means (EMMs), with the `emmeans` Package (extention of then `lsmeans` package, accounting for unbalanced groups and more general models), computes **adjusted means** that account for covariates in the model and multiple **contrast tests**. **In the back end, however, `emmeans` can be both impacted by the model chosen for fitting the data, and *reference grids* that are closely related to contrasts.**
+
+---
+
+**Contrast Analysis**  tests **specific hypotheses** (e.g., linear trends, group differences), including  **Dunnett’s Test** that compares multiple groups **against a reference**, **Helmert Contrasts** – compares each level to the mean of previous levels or **Polynomial Contrasts**.
+
+---
+
+Model-Based Comparisons (Likelihood Ratio Tests, Wald Tests) compare the fitness of two nested models, they are more versatile, including notably interactions between variables, but challenging to use in presence of interactions: 
+
+- **Likelihood Ratio Tests (LRT)** compare *nested* models.  
+- **Wald test** assesses the significance of individual coefficients in a regression model. Strong assumption of **asymptotic normality** of the MLE (implying that the regression framework is identifiable to a *generative probabilistic model*), and less reliable for small sample sizes. 
+
+---
+
+- General recap:
+
+ 
+| **Method** | **Use Case** | **Best For** |
+|------------|-------------|--------------|
+| **Pairwise Comparisons (Tukey, Bonferroni, Holm)** | Direct group-to-group comparisons | Simple ANOVA & balanced designs |
+| **Estimated Marginal Means (`emmeans`)** | Adjusted means for complex models | Mixed-effects & regression models |
+| **Contrast Analysis** | Custom hypothesis testing | Linear & polynomial trends |
+| **Likelihood Ratio & Wald Tests** | Model-based inference | GLMs & Mixed Models |
+
+
+:::
+
+
+## Cross-over versus ordinal contrasts
+
+- [`ggeffects`](https://strengejacke.github.io/ggeffects/articles/ggeffects.html?q=interaction#many-focal-terms-two-way-three-way--four-way--and-five-way-interactions)
+  - A `ggplot2`-compliant package to model interaction terms with their respective confidence intervals for a number of models (ebyond standard linear model `lm`).
+- Other visualisations and packages for modelling interaction terms are listed [here](https://bookdown.org/mike/data_analysis/moderation.html#application-2), including the [`sjPlot`]( https://strengejacke.github.io/sjPlot/articles/plot_interactions.html).
+  
+- *Ordinal* versus *disordinal*(*cross-over*) effects:
+  - [General introduction](https://www.linkedin.com/posts/adrianolszewski_statistics-activity-7228750359932936194-BU2X)
+  - [Distinguishing Ordinal and Disordinal Interactions](https://pmc.ncbi.nlm.nih.gov/articles/PMC3553243/#S6), from @widaman2012pm, introduces a method for determining the exact location of the **cross-over point**, namely the *point estimator* where the interaction effect dominates over the *marginal effect*. However, it suffers from a number of limitations:
+  
+    - No derivation of the condidence interval (point-wise estimate)
+    - Adjusted for linear models only
+    - Conclusion: 1st litterature gap identified, the lack of methods in `Deseq2` and relatives to set apart these two kinds of interaction effects.
+    
+![**Ordinal** versus **cross-over** interactions, from [Adrian LinkedIn post](https://www.linkedin.com/posts/adrianolszewski_statistics-activity-7228750359932936194-BU2X)](img/interaction_plots.jpeg)
+    
+- [Role of setting apart ordinal versus corss-over effects in power analysis](http://daniellakens.blogspot.com/2020/03/effect-sizes-and-power-for-interactions.html) is demonstrated in the blog with a simple dichotomous mediator variable.
+
+
+## Deseq2 interactions terms: a focus
+
+- `Slack` forums advocating for implementation of distinct design matrices, aka the **concatenation approach**:
+  - [`DESeq2`: detect significantly increasing across an ordinal variable](https://support.bioconductor.org/p/60440/), answered by Michael Love.
+  - [Two factor design including interaction effect with `DESeq2` in R](https://support.bioconductor.org/p/9154805/)
+  - [How to extract DESeq2 results for an interaction design](https://support.bioconductor.org/p/127848/)
+  
+
+From [`DESeq2` vignette](https://bioconductor.org/packages/release/bioc/vignettes/DESeq2/inst/doc/DESeq2.html):
+
+- **If I have multiple groups, should I run all together or split into pairs of groups?**
+
+> Run samples from all groups together, then use the `contrast` argument to extract comparisons of interest. All the samples indeed are relevant for computing the single dispersion parameter for each gene, and the final dispersion value incorporates the within-group variability across all groups.
+
+> However, if exploratory data analysis (EDA) plots reveal that one or more groups has much higher within-group variability than the others, then we could consider subsetting the dataset with the subgroups A and B exhibiting lower inflation, as including highly-variable subgroups could negatively impact the per-gene dispersion estimate for the remainders.
+
+- "Can I run DESeq2 to contrast the levels of many groups?"
+
+> `DESeq2` can work with any kind of design specified using the R formula, the only thing to consider is that of speed concern when fitting very large models, as each additional level adds another parameter to be fit by the GLM.
+
+> A simpler approach than adding interaction terms explicitly to the design formula is to combine the factors of interest into a single, dummy factor with all combinations of the original factors, and change the design to include just this factor.
+
+> Unlike the design `~genotype + condition`, where the condition effect represents the **overall main effect**, the main condition effect only represents the effect of condition for the reference level of genotype. The interaction terms give the difference between the condition effect for a given genotype and the condition effect for a **reference**.
+
+- [Trick of creating a global *dummy variable* for deriving instantly any contrast of interest](https://bioconductor.org/packages/3.21/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#interactions)
+
+![Account for effect sizes to increase sensibility of the method](img/shrinkage effects.png)
+
+## Deseq2 applied to interaction between treatment enzalutamide and hormone 11KT
+
+1. Proposed design is not functional: for example, step 3 studying the interaction effect only is biologically unrealistic, as it assumes no main effect for both treatment `enzalutamide` and hormone `11KT`, with the total effect driven only by the itneraction between `enzalutamide` and hormone `11KT`. On other terms, step 3) assumes that **hormone and enzalutamide have no independent effects**.  . Similarly, the current interaction plots and reporting dataframes below them can not be analysed as such, as respectively computed with formulas `~hormone`, `~treatment` and interaction term only: `~hormone:treatment`. 
+
+2. The proper design analysis (we only have to run the analysis once, at least the regression fitting itself!!, from `DESeq2::results()`): 
+
+i. Define the **full factorial model**: `~ hormone * enzalutamide` (Main Effects + Interaction), equivalent in R to `~ hormone + enzalutamide + hormone:enzalutamide` (see @eq-full-factorial for its mathematical notation).
+  
+$$
+\text{Model: } \text{Expression} = \beta_0 + \beta_1(\text{hormone}) + \beta_2(\text{enzalutamide}) + \beta_3(\text{hormone} \times \text{enzalutamide})
+$$ {#eq-full-factorial}
+
+- Interpretation of Coefficients**
+  - **Intercept** $\beta_0$: The baseline expression for the **control group (hormone=0, enzalutamide=0)**.
+  - **hormone** $\beta_1$: The effect of **hormone alone**, when `enzalutamide=0`.
+  - **enzalutamide** $\beta_2$: The effect of **enzalutamide alone**, when `hormone=0`.
+  - **hormone:enzalutamide** $\beta_3$: The **interaction term** (how enzalutamide modifies the hormone effect).
+
+We can implement this **full factorial model** in `DEseq2 ` with the following script @lst-DESeq2-full-design.
+
+```{r}
+#| label: DESeq2-full-design
+#| lst-label: lst-DESeq2-full-design
+#| lst-cap: Without original data, we simulate a dataset really close to the biological experiment mentionned (notably with same design matrix and variables names).
+# simulated scripts
+dds <- makeExampleDESeqDataSet(n=100,m=12,betaSD = 4)
+colnames(colData(dds))[colnames(colData(dds)) == "condition"] <- "treatment"
+dds$treatment <- factor(dds$treatment, levels =c("A", "B"), labels =c("Sans", "With"))
+dds$hormone <- factor(rep(rep(c("DMSO","11KT"),each=3),2))
+dds$hormone <- relevel(dds$hormone, ref = "DMSO") # set DMSO as the reference, otherwise, by default lexicographic order is chosen, making 11KT the reference
+# note that this won't change the final selection of genes, however, it will change the interpreation of the coefficients!!
+
+design(dds) <- ~ hormone + treatment + hormone:treatment # dds being your `DESeqDataSet
+dds <- DESeq(dds) # perform the GLM regression (only once!!)
+resultsNames(dds) # retrieve the names associated with the design
+```
+
+ii. Determine contrats of interests: 
+
+- **Differentially expressed genes in response to exposure to `11KT`**. Two ways of interpreting this question: do we subset the DEGs when there's no treatment effect (answered in @lst-hormone-effect-without-treatment, that's equivalent to evaluate the significance of $\beta_1$), or do we want to compute a global effect of `11KT`, with and without treatment (answered in @lst-global-hormone-effect, evalutes $\beta_1 + \beta_3$). For me, this second interpreation does not make sense biologically. Indeed, if an interaction is acknowledged between `11KT` and `treatment`, it is no longer possible to speak of the average effect of `11KT`, since this effect varies depends on the presence of a treatment or not^[You may check the result running only `design(dds) <- ~ hormone`, and considering the second coefficient. In this specific case where the design is **balanced**, we can also recover this specific contrast with `contrast=c(-1/2, 1/2, -1/2, 1/2)` from the full factorial design. Computation of the coefficients is inspired from [DeSeq2 Comparing One group vs Two groups Bioconductor group](https://support.bioconductor.org/p/9140327/)].
+
+```{r}
+#| label: hormone-effect-without-treatment
+#| lst-label: lst-hormone-effect-without-treatment
+#| lst-cap: Evaluate effect of non canonical androgenes, such as `11KT`, **without treatment only**!!
+
+results(dds, contrast=c("hormone","11KT","DMSO"),
+        lfcThreshold = 1.5, altHypothesis="greaterAbs")
+# equivalent to results(dds, list( c("hormone_11KT_vs_DMSO") ))
+```
+
+```{r}
+#| label: global-hormone-effect
+#| lst-label: lst-global-hormone-effect
+#| lst-cap: Evaluate global effect of non canonical androgenes, such as `11KT`. The two presented methods prove equivalent, if and only if the design is **balanced** (which is is the case here, with three replicates for each condition).
+
+results(dds, contrast=c(-1/2, 1/2, -1/2, 1/2),
+        lfcThreshold = 1.5, altHypothesis="greaterAbs")
+
+
+dds2 <- dds
+design(dds2) <- ~ hormone
+dds2 <- DESeq(dds2)
+resultsNames(dds2)
+results(dds2, contrast=list( c("hormone_11KT_vs_DMSO")),
+        lfcThreshold = 1.5, altHypothesis="greaterAbs")
+```
+
+- Not differentially expressed genes based on the addition or absence of enzalutamide. Same remark as previous bullet point: if the interaction term is significant, then we should not compute a global *main effect* of the impact of treatment. I will rewrite the global biological question that makes sense according to me: determine the subset of genes with significant differential expression in response to `11KT` (in other words, test whether $\beta_1$ is signicant), without interaction with the `treatment` enzalutamide (in other words, test whether the interaction effect $\beta_3$ is **not** signicant), see @lst-biological-question.
+
+```{r}
+#| label: biological-question
+#| lst-label: lst-biological-question
+#| lst-cap: The minimal set of operations that address better, up to my understanding, the challenge raised by biologists to identify DEGs of non-canonical androgens that are not mitigated by interaction with the treatment.
+
+beta1_signficant <- results(dds, contrast=c("hormone","11KT","DMSO"),
+        lfcThreshold = 1.5, altHypothesis="greaterAbs") |> 
+  as.data.frame() |> 
+  dplyr::filter(padj <=0.05 & abs(log2FoldChange) > 1.5) |> 
+  tibble::rownames_to_column("genes")
+
+beta3_not_significant <- results(dds, contrast=list("hormone11KT.treatmentWith"),
+        lfcThreshold = 1.5, altHypothesis="lessAbs") |> 
+  as.data.frame() |> 
+  dplyr::filter(padj <=0.05) |> 
+  tibble::rownames_to_column("genes")
+
+```
+
+- Compute the intersection to answer the biological objective:
+
+```{r}
+#| label: gene-intersection
+saved_genes <- beta1_signficant |> dplyr::inner_join(beta3_not_significant, by = "genes")
+```
+
+- **Optionnal 1**: run `lfcShrink` to increase sensitivity and detect more genes (reducing variance indeed implies tighter confidence intervals, and enhanced detection of DEGs). In particular, this avoids detecting only detecting genes with overall low or averaged expression, as the genes with higher expression are also the ones that tend to exhibit much higher variability (see @lst-shrinkage). 
+
+```{r}
+#| label: shrinkage
+#| lst-label: lst-shrinkage
+#| lst-cap: Illustration of shrunk estimates to gain power and sensitivity. Indeed, **sensitivity** in the context of differential analysis quantifies the ability to detect truely differentially expressed (DE) genes.
+
+lfcShrink(dds=dds,type="apeglm", coef = 4) # test the interaction term, apeglm is now the recommended one as the msot versatile
+```
+
+
+- **Optionnal 2**: run a LRT test (sort of ANOVA generalisation to evaluate and compare globally **nested models**) instead of a *wald test* (traditional approach). Indeed, we can't run `ANOVA`directly, as the underlying generative model is not linear/gaussian. Note that with only one interaction term, this is not really relevant (starting from three groups, this could make sense) + is less versatile than the Wald test (only possible to evaluate whether a coefficient is null ($H_0$) or not), see @lst-LRT.
+
+```{r}
+#| label: LRT
+#| lst-label: lst-LRT
+#| lst-cap: Illustration of Wald versus LRT estimates. Note that LRT shows its true utility with multi-factorial design (beyond two), otherwise, it's much less flexible compared to the **Wald's test** (only one null Hypothesis, namely whether all added coefficients are not significant compared to a *nested, reduced* model).
+
+dds_lrt <- DESeq(dds, test = "LRT", reduced = ~ treatment + hormone)
+results(dds_lrt, contrast=list( c("hormone11KT.treatmentWith")))
+```
+
+
+- From [Running DESeq2 with gene-dependent binary variable such as membership in pathway?](https://support.bioconductor.org/p/103342/), we should use the same regression model (namely with the interaction term, even if found significant for a subset of the genes). Susequently, we may add a pathway-informed (or any other dependent variable) in the **post-hoc** analyses^[For instance, consider package [`IHW`](https://bioconductor.org/packages/release/bioc/vignettes/IHW/inst/doc/introduction_to_ihw.html) and [Running DESeq2 with gene-dependent binary variable such as membership in pathway BioConductor Discussion](https://support.bioconductor.org/p/103342/)] to that end.  
+
+  
+3. [General conclusion: I need the exact R commands and a snapshot of the dataset and/or design matrix, as we lose lost of time interpreting coefficients with the unexpected design + I can provide the exact R variables.]{fg="red"}
+
+
+# TODO and Litterature gaps:
+
+- Set apart types of gene interactions (ordinal or cross-over). **For visualisation**, avoid custom axis legend per facet, as it may squeeze or exaggerate the magnitude of the effect. 
+- Interpretation of the regression coefficients in GLMs.
+- Balanced or unbalanced design? (lack of power, but should be handled by `Deseq2`). Seems **balanced** (3 samples per subgroup).
+- Paired or unpaired samples (is treatment carried on the same samples without treatment?)
+- By restraining the experimental design to the only set of genes showcasing no interaction terms, do we artificially decrease variability estimation of the coefficients? Is it biologically valid to do so (in real biological case, no easy control of a given subset of genes)?
+- Another litterature gap: 
+  - Compute **marginal effects** in presence of interaction terms for more complex models (here, `Deseq2`), in other words, tailor `Deseq2` to the [`emmeans` package](https://aosmith.rbind.io/2019/03/25/getting-started-with-emmeans/#within-group-comparisons)
+  - Benchmark distinct post-hoc approaches, see @tip-post-hoc (knowing that `Deseq2` has its own approach to correct for Multiple tests).
+
+  
+
